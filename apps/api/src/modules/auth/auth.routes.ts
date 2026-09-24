@@ -13,7 +13,7 @@ const REFRESH_COOKIE = 'kopi_rt';
 const cookieOptions = (): CookieOptions => ({
   httpOnly: true,
   secure: env.COOKIE_SECURE || isProd,
-  sameSite: 'lax',
+  sameSite: 'none',
   path: '/api/v1/auth',
   domain: env.COOKIE_DOMAIN || undefined,
   maxAge: 7 * 24 * 60 * 60 * 1000,
