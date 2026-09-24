@@ -3,14 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "description": "KopiShop API deployment package",
-  "workspaces": [
-    "apps/api"
-  ],
-  "engines": {
-    "node": ">=20.0.0"
-  },
+  "workspaces": ["apps/api"],
+  "engines": {"node": ">=20.0.0"},
   "scripts": {
-    "build": "npm run build -w @kopi-pos/api && npx prisma db push --schema apps/api/prisma/schema.prisma --accept-data-loss",
+    "build": "npm run build -w @kopi-pos/api",
     "start": "npm run start -w @kopi-pos/api",
     "db:generate": "npm run db:generate -w @kopi-pos/api",
     "db:deploy": "npm run db:deploy -w @kopi-pos/api",
