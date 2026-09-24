@@ -1,0 +1,646 @@
+// ---------------------------------------------------------------------------
+// Kopi POS — data model
+// Design notes:
+//  * Catalog data (categories, products, ingredients, suppliers) is organisation
+//    level so it can be shared by every branch.
+//  * Operational data (stock levels, orders, expenses, purchase orders, shifts)
+//    is branch scoped — this is what makes the system multi-branch ready.
+//  * Money uses Decimal(18,2); physical quantities use Decimal(18,4).
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================== Enums ======================================
+
+enum Role {
+  ADMIN
+  MANAGER
+  CASHIER
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum UnitType {
+  GRAM
+  KILOGRAM
+  MILLILITER
+  LITER
+  PIECE
+  PACK
+  SHOT
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  VOIDED
+  REFUNDED
+}
+
+enum OrderChannel {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+}
+
+enum PaymentMethod {
+  CASH
+  QRIS
+  DEBIT_CARD
+  CREDIT_CARD
+  EWALLET
+  BANK_TRANSFER
+  VOUCHER
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum StockMovementType {
+  OPENING
+  PURCHASE
+  SALE
+  ADJUSTMENT
+  WASTAGE
+  RETURN
+  TRANSFER_IN
+  TRANSFER_OUT
+  VOID_RESTOCK
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum NotificationType {
+  LOW_STOCK
+  OUT_OF_STOCK
+  PURCHASE_ORDER
+  SHIFT
+  SYSTEM
+}
+
+// ============================== Tenancy ====================================
+
+model Branch {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  address   String?
+  phone     String?
+  timezone  String   @default("Asia/Jakarta")
+  isActive  Boolean  @default(true)
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users          User[]
+  stocks         InventoryStock[]
+  stockMovements StockMovement[]
+  orders         Order[]
+  expenses       Expense[]
+  purchaseOrders PurchaseOrder[]
+  shifts         Shift[]
+  notifications  Notification[]
+  auditLogs      AuditLog[]
+
+  @@index([isActive])
+  @@map("branches")
+}
+
+// ============================== Identity ===================================
+
+model User {
+  id           String           @id @default(uuid())
+  employeeCode String           @unique
+  email        String           @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  role         Role             @default(CASHIER)
+  status       EmploymentStatus @default(ACTIVE)
+  /// Optional 4-6 digit PIN hash for fast POS terminal switching.
+  pinHash      String?
+  avatarUrl    String?
+  hourlyRate   Decimal?         @db.Decimal(18, 2)
+  hiredAt      DateTime?
+  lastLoginAt  DateTime?
+  /// Failed login counter used for brute-force lockout.
+  failedLogins Int              @default(0)
+  lockedUntil  DateTime?
+  branchId     String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  deletedAt    DateTime?
+
+  branch         Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  refreshTokens  RefreshToken[]
+  orders         Order[]
+  shifts         Shift[]
+  stockMovements StockMovement[]
+  expenses       Expense[]
+  purchaseOrders PurchaseOrder[]
+  auditLogs      AuditLog[]
+
+  @@index([role, status])
+  @@index([branchId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  /// SHA-256 of the issued token — the raw value is never stored.
+  tokenHash String    @unique
+  userId    String
+  familyId  String
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ============================== Catalog ====================================
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  color     String   @default("#8B5E3C")
+  icon      String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id           String   @id @default(uuid())
+  sku          String   @unique
+  barcode      String?  @unique
+  name         String
+  description  String?
+  categoryId   String
+  imageUrl     String?
+  basePrice    Decimal  @db.Decimal(18, 2)
+  /// Fallback cost used when a product has no recipe (e.g. resale goods).
+  baseCost     Decimal  @default(0) @db.Decimal(18, 2)
+  taxRate      Decimal  @default(0) @db.Decimal(5, 4)
+  isActive     Boolean  @default(true)
+  isFavorite   Boolean  @default(false)
+  /// Products without a recipe are not stock-tracked through ingredients.
+  trackRecipe  Boolean  @default(true)
+  preparingSec Int      @default(0)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  category   Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  variants   ProductVariant[]
+  recipe     RecipeItem[]
+  orderItems OrderItem[]
+
+  @@index([categoryId, isActive])
+  @@index([name])
+  @@map("products")
+}
+
+model ProductVariant {
+  id        String   @id @default(uuid())
+  productId String
+  name      String
+  sku       String?  @unique
+  /// Added to (or subtracted from) the product base price.
+  priceDelta Decimal @default(0) @db.Decimal(18, 2)
+  /// Scales every recipe line — e.g. a Large latte uses 1.4x ingredients.
+  recipeMultiplier Decimal @default(1) @db.Decimal(8, 4)
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@unique([productId, name])
+  @@map("product_variants")
+}
+
+model Ingredient {
+  id           String   @id @default(uuid())
+  sku          String   @unique
+  name         String
+  unit         UnitType
+  /// Weighted-average cost per base unit, recalculated on every goods receipt.
+  costPerUnit  Decimal  @default(0) @db.Decimal(18, 4)
+  lowStockAt   Decimal  @default(0) @db.Decimal(18, 4)
+  reorderQty   Decimal  @default(0) @db.Decimal(18, 4)
+  supplierId   String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  supplier   Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  recipeIn   RecipeItem[]
+  stocks     InventoryStock[]
+  movements  StockMovement[]
+  poItems    PurchaseOrderItem[]
+
+  @@index([isActive])
+  @@map("ingredients")
+}
+
+model RecipeItem {
+  id           String  @id @default(uuid())
+  productId    String
+  ingredientId String
+  /// Quantity consumed per single unit sold, expressed in the ingredient unit.
+  quantity     Decimal @db.Decimal(18, 4)
+  isOptional   Boolean @default(false)
+
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@unique([productId, ingredientId])
+  @@index([ingredientId])
+  @@map("recipe_items")
+}
+
+// ============================== Inventory ==================================
+
+model InventoryStock {
+  id           String   @id @default(uuid())
+  branchId     String
+  ingredientId String
+  quantity     Decimal  @default(0) @db.Decimal(18, 4)
+  updatedAt    DateTime @updatedAt
+
+  branch     Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, ingredientId])
+  @@index([branchId])
+  @@map("inventory_stocks")
+}
+
+/// Append-only ledger. Current stock is always reproducible from this table.
+model StockMovement {
+  id           String            @id @default(uuid())
+  branchId     String
+  ingredientId String
+  type         StockMovementType
+  /// Signed: negative for consumption, positive for replenishment.
+  quantity     Decimal           @db.Decimal(18, 4)
+  balanceAfter Decimal           @db.Decimal(18, 4)
+  unitCost     Decimal           @default(0) @db.Decimal(18, 4)
+  referenceType String?
+  referenceId  String?
+  note         String?
+  userId       String?
+  createdAt    DateTime          @default(now())
+
+  branch     Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  user       User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([branchId, createdAt])
+  @@index([ingredientId, createdAt])
+  @@index([referenceType, referenceId])
+  @@map("stock_movements")
+}
+
+// ============================== Purchasing =================================
+
+model Supplier {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  contactName String?
+  phone       String?
+  email       String?
+  address     String?
+  paymentTerm String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ingredients    Ingredient[]
+  purchaseOrders PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+model PurchaseOrder {
+  id          String              @id @default(uuid())
+  poNumber    String              @unique
+  branchId    String
+  supplierId  String
+  status      PurchaseOrderStatus @default(DRAFT)
+  orderedAt   DateTime?
+  expectedAt  DateTime?
+  receivedAt  DateTime?
+  subtotal    Decimal             @default(0) @db.Decimal(18, 2)
+  taxAmount   Decimal             @default(0) @db.Decimal(18, 2)
+  shippingFee Decimal             @default(0) @db.Decimal(18, 2)
+  total       Decimal             @default(0) @db.Decimal(18, 2)
+  note        String?
+  createdById String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  branch    Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  supplier  Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdBy User?               @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  items     PurchaseOrderItem[]
+
+  @@index([branchId, status])
+  @@index([createdAt])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String  @id @default(uuid())
+  purchaseOrderId String
+  ingredientId    String
+  quantity        Decimal @db.Decimal(18, 4)
+  receivedQty     Decimal @default(0) @db.Decimal(18, 4)
+  unitCost        Decimal @db.Decimal(18, 4)
+  lineTotal       Decimal @db.Decimal(18, 2)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  ingredient    Ingredient    @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseOrderId])
+  @@map("purchase_order_items")
+}
+
+// ============================== Customers ==================================
+
+model Customer {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  name          String
+  phone         String?   @unique
+  email         String?   @unique
+  birthDate     DateTime?
+  loyaltyPoints Int       @default(0)
+  totalSpent    Decimal   @default(0) @db.Decimal(18, 2)
+  visitCount    Int       @default(0)
+  lastVisitAt   DateTime?
+  note          String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  orders Order[]
+
+  @@index([name])
+  @@map("customers")
+}
+
+// ============================== Sales ======================================
+
+model Order {
+  id          String       @id @default(uuid())
+  orderNumber String       @unique
+  /// Client generated UUID — guarantees offline replays never double-post.
+  idempotencyKey String?   @unique
+  branchId    String
+  cashierId   String
+  customerId  String?
+  shiftId     String?
+  status      OrderStatus  @default(PENDING)
+  channel     OrderChannel @default(DINE_IN)
+  tableNumber String?
+
+  subtotal       Decimal @default(0) @db.Decimal(18, 2)
+  discountAmount Decimal @default(0) @db.Decimal(18, 2)
+  taxAmount      Decimal @default(0) @db.Decimal(18, 2)
+  serviceAmount  Decimal @default(0) @db.Decimal(18, 2)
+  roundingAmount Decimal @default(0) @db.Decimal(18, 2)
+  total          Decimal @default(0) @db.Decimal(18, 2)
+  paidAmount     Decimal @default(0) @db.Decimal(18, 2)
+  changeAmount   Decimal @default(0) @db.Decimal(18, 2)
+  /// Sum of ingredient cost snapshots — the basis for gross profit.
+  costTotal      Decimal @default(0) @db.Decimal(18, 2)
+
+  discountType   DiscountType?
+  discountValue  Decimal?      @db.Decimal(18, 2)
+  note           String?
+  voidReason     String?
+  voidedAt       DateTime?
+  completedAt    DateTime?
+  /// Timestamp captured on the device — differs from createdAt when offline.
+  clientCreatedAt DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  branch   Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  cashier  User      @relation(fields: [cashierId], references: [id], onDelete: Restrict)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  shift    Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  items    OrderItem[]
+  payments Payment[]
+
+  @@index([branchId, createdAt])
+  @@index([branchId, status])
+  @@index([cashierId, createdAt])
+  @@index([customerId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  productId String
+  variantId String?
+
+  /// Denormalised so historical receipts survive catalog edits.
+  productName String
+  variantName String?
+  quantity    Int
+  unitPrice   Decimal @db.Decimal(18, 2)
+  /// Per-unit ingredient cost at the moment of sale (COGS snapshot).
+  unitCost    Decimal @default(0) @db.Decimal(18, 2)
+  discountAmount Decimal @default(0) @db.Decimal(18, 2)
+  taxAmount      Decimal @default(0) @db.Decimal(18, 2)
+  lineTotal      Decimal @db.Decimal(18, 2)
+  note           String?
+
+  order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  orderId       String
+  method        PaymentMethod
+  status        PaymentStatus @default(PAID)
+  amount        Decimal       @db.Decimal(18, 2)
+  /// Acquirer/EDC fee, deducted from net revenue in reports.
+  feeAmount     Decimal       @default(0) @db.Decimal(18, 2)
+  referenceNo   String?
+  qrisPayload   String?
+  paidAt        DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([method, paidAt])
+  @@map("payments")
+}
+
+model Shift {
+  id            String      @id @default(uuid())
+  branchId      String
+  userId        String
+  status        ShiftStatus @default(OPEN)
+  openingCash   Decimal     @default(0) @db.Decimal(18, 2)
+  closingCash   Decimal?    @db.Decimal(18, 2)
+  expectedCash  Decimal?    @db.Decimal(18, 2)
+  difference    Decimal?    @db.Decimal(18, 2)
+  note          String?
+  openedAt      DateTime    @default(now())
+  closedAt      DateTime?
+
+  branch Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  orders Order[]
+
+  @@index([branchId, status])
+  @@map("shifts")
+}
+
+// ============================== Finance ====================================
+
+model ExpenseCategory {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  /// Fixed costs are excluded from variable-cost ratios in reports.
+  isFixed   Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  expenses Expense[]
+
+  @@map("expense_categories")
+}
+
+model Expense {
+  id          String   @id @default(uuid())
+  branchId    String
+  categoryId  String
+  title       String
+  amount      Decimal  @db.Decimal(18, 2)
+  paymentMethod PaymentMethod @default(CASH)
+  vendor      String?
+  receiptUrl  String?
+  note        String?
+  spentAt     DateTime
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  branch    Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  category  ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdBy User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([branchId, spentAt])
+  @@map("expenses")
+}
+
+// ============================== Platform ===================================
+
+model Setting {
+  key       String   @id
+  value     Json
+  group     String   @default("general")
+  updatedAt DateTime @updatedAt
+
+  @@index([group])
+  @@map("settings")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  branchId   String?
+  userId     String?
+  action     String
+  entity     String
+  entityId   String?
+  /// Only changed fields are captured; secrets are redacted before write.
+  changes    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  branchId  String?
+  type      NotificationType
+  title     String
+  message   String
+  severity  String           @default("info")
+  metadata  Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([branchId, readAt])
+  @@index([createdAt])
+  @@map("notifications")
+}

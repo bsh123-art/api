@@ -1,0 +1,11 @@
+project_id = "kopishop"
+
+[db]
+major_version = 17
+
+[api]
+enabled = true
+schemas = ["public", "storage"]
+
+[realtime]
+enabled = true
