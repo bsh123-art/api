@@ -1,0 +1,18 @@
+{
+  "name": "kopishop-api-deploy",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/api"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "npm run build -w @kopi-pos/api",
+    "start": "npm run start -w @kopi-pos/api",
+    "db:generate": "npm run db:generate -w @kopi-pos/api",
+    "db:deploy": "npm run db:deploy -w @kopi-pos/api",
+    "db:seed": "npm run db:seed -w @kopi-pos/api"
+  }
+}
