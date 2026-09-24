@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { OrderChannel, PaymentMethod, StockMovementType } from '@prisma/client';
 
 export const orderItemSchema = z.object({
-  productId: z.string().uuid(),
+  productId: z.string().min(1),
   variantId: z.string().uuid().nullish(),
   quantity: z.number().int().min(1).max(999),
   /** Per-line discount in currency units, applied before order-level discount. */
