@@ -1,36 +1,19 @@
 {
-  "name": "kopi-pos",
+  "name": "kopishop-api-deploy",
   "version": "1.0.0",
   "private": true,
-  "description": "Coffee Shop POS — multi-branch ready point of sale, inventory and analytics platform",
+  "description": "KopiShop API deployment package",
   "workspaces": [
-    "apps/*"
+    "apps/api"
   ],
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w @kopi-pos/api\" \"npm run dev -w @kopi-pos/web\"",
-    "build": "npm run build -w @kopi-pos/api && npm run build -w @kopi-pos/web",
-    "start": "concurrently -n api,web -c blue,magenta \"npm run start -w @kopi-pos/api\" \"npm run start -w @kopi-pos/web\"",
-    "typecheck": "npm run typecheck -w @kopi-pos/api && npm run typecheck -w @kopi-pos/web",
-    "lint": "npm run lint -w @kopi-pos/web",
+    "build": "npm run build -w @kopi-pos/api && npm run db:deploy -w @kopi-pos/api",
+    "start": "npm run start -w @kopi-pos/api",
     "db:generate": "npm run db:generate -w @kopi-pos/api",
-    "db:migrate": "npm run db:migrate -w @kopi-pos/api",
-    "db:push": "npm run db:push -w @kopi-pos/api",
-    "db:seed": "npm run db:seed -w @kopi-pos/api",
-    "db:studio": "npm run db:studio -w @kopi-pos/api",
-    "docker:up": "docker compose up -d --build",
-    "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f",
-    "android:sync": "npm run build -w @kopi-pos/web && cap sync android",
-    "android:open": "cap open android",
-    "android:apk": "npm run android:sync && node scripts/build-android.cjs"
-  },
-  "devDependencies": {
-    "@capacitor/android": "^8.5.2",
-    "@capacitor/cli": "^8.5.2",
-    "@capacitor/core": "^8.5.2",
-    "concurrently": "^9.1.0"
+    "db:deploy": "npm run db:deploy -w @kopi-pos/api",
+    "db:seed": "npm run db:seed -w @kopi-pos/api"
   }
 }
