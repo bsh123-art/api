@@ -104,7 +104,7 @@ export async function salesSeries(branchId: string, range: DateRange, granularit
              COALESCE(SUM("costTotal"), 0)::text   AS cost,
              COUNT(*)                              AS orders
       FROM "orders"
-      WHERE "branchId" = ${branchId}::uuid
+      WHERE "branchId" = ${branchId}
         AND "status" = 'COMPLETED'
         AND "createdAt" BETWEEN ${range.from} AND ${range.to}
       GROUP BY bucket
@@ -159,7 +159,7 @@ export async function categoryBreakdown(branchId: string, range: DateRange) {
       JOIN "orders" o     ON o."id" = oi."orderId"
       JOIN "products" p   ON p."id" = oi."productId"
       JOIN "categories" c ON c."id" = p."categoryId"
-      WHERE o."branchId" = ${branchId}::uuid
+      WHERE o."branchId" = ${branchId}
         AND o."status" = 'COMPLETED'
         AND o."createdAt" BETWEEN ${range.from} AND ${range.to}
       GROUP BY c."id", c."name", c."color"
@@ -184,7 +184,7 @@ export async function hourlyDistribution(branchId: string, range: DateRange) {
              COALESCE(SUM("total"), 0)::text     AS revenue,
              COUNT(*)                            AS orders
       FROM "orders"
-      WHERE "branchId" = ${branchId}::uuid
+      WHERE "branchId" = ${branchId}
         AND "status" = 'COMPLETED'
         AND "createdAt" BETWEEN ${range.from} AND ${range.to}
       GROUP BY hour
@@ -291,7 +291,7 @@ export async function dashboard(branchId: string) {
           SELECT COUNT(*) AS count
           FROM "inventory_stocks" s
           JOIN "ingredients" i ON i."id" = s."ingredientId"
-          WHERE s."branchId" = ${branchId}::uuid AND i."isActive" = true AND s."quantity" <= i."lowStockAt"
+          WHERE s."branchId" = ${branchId} AND i."isActive" = true AND s."quantity" <= i."lowStockAt"
         `,
       ),
       prisma.order.findMany({
