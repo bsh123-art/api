@@ -2,8 +2,24 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { isProd } from '../config/env';
 import { logger } from '../core/logger';
 
+// Allow a bounded pool override without rewriting or exposing database credentials.
+const configuredDatabaseUrl = (): string | undefined => {
+  const limit = process.env.PRISMA_CONNECTION_LIMIT;
+  if (!limit) return undefined;
+  if (!/^[1-9]\d*$/.test(limit) || Number(limit) > 20) {
+    throw new Error('PRISMA_CONNECTION_LIMIT must be an integer between 1 and 20');
+  }
+  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
+  const url = new URL(process.env.DATABASE_URL);
+  url.searchParams.set('connection_limit', limit);
+  return url.toString();
+};
+
+const datasourceUrl = configuredDatabaseUrl();
+
 const createClient = () =>
   new PrismaClient({
+    ...(datasourceUrl ? { datasources: { db: { url: datasourceUrl } } } : {}),
     log: [
       { emit: 'event', level: 'error' },
       { emit: 'event', level: 'warn' },
